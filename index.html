@@ -1,68 +1,96 @@
 <!DOCTYPE html>
-<html>
+<html lang="zh-CN">
 <head>
-    <meta charset="utf-8">
+    <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>拓印AR毕设</title>
-    <!-- 用兼容版MindAR（内置Three.js，无需单独引入） -->
-    <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js"></script>
+    <!-- 引入MindAR官方稳定版（1.2.5，兼容所有设备） -->
+    <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image.prod.js"></script>
+    <!-- 引入Three.js官方版（和MindAR适配） -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.130.1/build/three.min.js"></script>
     <style>
-        body { margin: 0; padding: 0; }
+        body { margin: 0; padding: 0; background: #000; }
         #ar-container { width: 100vw; height: 100vh; }
+        .tip { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); color: #fff; font-size: 14px; z-index: 999; }
     </style>
 </head>
 <body>
+    <div class="tip">点击屏幕启动AR → 对准拓片播放动画</div>
     <div id="ar-container"></div>
 
     <script>
-        // 极简AR初始化逻辑
-        async function startAR() {
-            try {
-                // 初始化MindAR（核心：用正确的构造函数）
-                const mindar = new MindARImageThree({
-                    container: document.getElementById('ar-container'),
-                    imageTargetSrc: 'targets.mind'
-                });
-                const { renderer, scene, camera } = mindar;
+        // 全局变量，确保库加载完成
+        let mindarThree, anchor, video;
 
-                // 加载视频
-                const video = document.createElement('video');
+        // 核心AR启动函数（官方标准语法）
+        async function initAR() {
+            try {
+                // 1. 初始化MindAR（官方正确写法，首字母大写M）
+                mindarThree = new window.MINDAR.IMAGE.MindARThree({
+                    container: document.getElementById('ar-container'),
+                    imageTargetSrc: 'targets.mind', // 你的拓片识别文件
+                    maxTrack: 1, // 只识别1个目标，提升性能
+                    filterMinCF: 0.5 // 降低识别阈值，更容易识别
+                });
+
+                // 2. 获取Three.js核心对象
+                const { renderer, scene, camera } = mindarThree;
+                scene.background = new THREE.Color(0x000000); // 黑色背景
+
+                // 3. 加载动画视频（适配移动端播放规则）
+                video = document.createElement('video');
                 video.src = 'animation.mp4';
                 video.loop = true;
-                video.muted = true;
-                video.playsInline = true;
+                video.muted = true; // 静音必加，否则手机无法自动播放
+                video.playsInline = true; // 移动端内联播放，不跳全屏
+                video.preload = 'auto';
                 await video.load();
 
-                // 创建视频平面
+                // 4. 创建视频纹理和播放平面
                 const videoTexture = new THREE.VideoTexture(video);
-                const plane = new THREE.Mesh(
-                    new THREE.PlaneGeometry(1, 1),
-                    new THREE.MeshBasicMaterial({ map: videoTexture, transparent: true })
-                );
+                const planeGeometry = new THREE.PlaneGeometry(0.8, 0.8); // 适配拓片大小
+                const planeMaterial = new THREE.MeshBasicMaterial({
+                    map: videoTexture,
+                    transparent: true,
+                    side: THREE.DoubleSide
+                });
+                const videoPlane = new THREE.Mesh(planeGeometry, planeMaterial);
 
-                // 绑定到识别目标
-                const anchor = mindar.addAnchor(0);
-                anchor.group.add(plane);
+                // 5. 绑定视频到第一个识别目标（targets.mind里的ID=0）
+                anchor = mindarThree.addAnchor(0);
+                anchor.group.add(videoPlane);
 
-                // 启动AR
-                await mindar.start();
+                // 6. 启动AR并渲染
+                await mindarThree.start(); // 启动摄像头
                 renderer.setAnimationLoop(() => {
-                    if (anchor.group.visible) video.play();
+                    // 识别到拓片时播放视频
+                    if (anchor.group.visible && video.paused) {
+                        video.play().catch(err => console.log('播放触发:', err));
+                    }
                     renderer.render(scene, camera);
                 });
 
+                document.querySelector('.tip').textContent = '已启动AR → 对准拓片即可播放';
+
             } catch (err) {
-                alert('AR启动失败：' + err.message + '\n错误类型：' + err.name);
-                console.error('详细错误：', err);
+                // 详细报错提示，方便定位问题
+                alert(`AR启动失败：${err.message}\n错误详情：${err.stack.substring(0, 100)}`);
+                console.error('AR初始化错误:', err);
             }
         }
 
-        // 页面加载后启动（兼容移动端）
+        // 移动端必须手动触发（解决浏览器权限/自动播放限制）
+        document.addEventListener('click', () => {
+            if (!mindarThree) {
+                initAR(); // 首次点击启动AR
+            } else if (video && video.paused) {
+                video.play(); // 后续点击恢复播放
+            }
+        }, { once: false });
+
+        // 页面加载完成后提示
         window.onload = () => {
-            // 手动触发（解决移动端自动播放限制）
-            document.body.addEventListener('click', startAR, { once: true });
-            // 提示用户点击屏幕启动
-            alert('请点击屏幕启动AR，然后对准拓片');
+            console.log('页面加载完成，等待点击启动AR');
         };
     </script>
 </body>
