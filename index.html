@@ -4,13 +4,20 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>拓印AR毕设</title>
-    <!-- 引入本地离线库（关键！不再依赖CDN） -->
-    <script src="mindar-image.prod.js"></script>
-    <script src="three.min.js"></script>
+    <!-- 1. 引入Three.js（MindAR依赖） -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.130.1/build/three.min.js"></script>
+    <!-- 2. 引入MindAR主模块 + 子模块（官方完整依赖链） -->
+    <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/controller-mGt1s8dJ.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/ui-fBadYuor.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image.prod.js"></script>
     <style>
         body { margin: 0; padding: 0; background: #000; }
         #ar-container { width: 100vw; height: 100vh; }
-        .tip { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); color: #fff; font-size: 14px; z-index: 999; }
+        .tip { 
+            position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
+            color: #fff; font-size: 14px; z-index: 999; text-align: center;
+            background: rgba(0,0,0,0.7); padding: 8px 15px; border-radius: 4px;
+        }
     </style>
 </head>
 <body>
@@ -18,37 +25,46 @@
     <div id="ar-container"></div>
 
     <script>
-        // 等待所有本地库加载完成
-        window.onload = async () => {
-            // 先验证库是否加载成功
-            if (!window.MINDAR) {
-                alert('MindAR库加载失败！请检查文件是否存在：mindar-image.prod.js');
-                return;
+        // 等待所有CDN库加载完成
+        let isReady = false;
+        function checkReady() {
+            if (window.THREE && window.MINDAR && window.MINDAR.IMAGE) {
+                isReady = true;
+                document.querySelector('.tip').textContent = '库加载完成 ✅ 点击屏幕启动AR';
+            } else {
+                setTimeout(checkReady, 100);
             }
-            if (!window.THREE) {
-                alert('Three.js库加载失败！请检查文件是否存在：three.min.js');
+        }
+        checkReady();
+
+        // 核心AR启动函数
+        async function startAR() {
+            if (!isReady) {
+                alert('库还在加载中，请稍等！');
                 return;
             }
 
-            // 绑定点击事件启动AR
-            document.addEventListener('click', initAR, { once: true });
-        };
-
-        // 核心AR初始化函数
-        async function initAR() {
             try {
-                // 1. 初始化MindAR（本地库已加载，必能找到MINDAR）
-                const mindarThree = new window.MINDAR.IMAGE.MindARThree({
+                // 初始化MindAR（适配模块化版本的正确写法）
+                const mindarController = new window.MINDAR.IMAGE.Controller({
                     container: document.getElementById('ar-container'),
                     imageTargetSrc: 'targets.mind',
-                    maxTrack: 1,
-                    filterMinCF: 0.3 // 极低识别阈值，确保容易识别
+                    maxTrack: 1
                 });
+                await mindarController.init(); // 初始化追踪器
 
-                const { renderer, scene, camera } = mindarThree;
-                scene.background = new THREE.Color(0x000000);
+                // 创建Three.js场景
+                const scene = new THREE.Scene();
+                const camera = mindarController.createCamera();
+                const renderer = new THREE.WebGLRenderer({
+                    antialias: true,
+                    alpha: true
+                });
+                renderer.setSize(window.innerWidth, window.innerHeight);
+                renderer.setPixelRatio(window.devicePixelRatio);
+                document.getElementById('ar-container').appendChild(renderer.domElement);
 
-                // 2. 加载视频（本地文件）
+                // 加载并播放视频
                 const video = document.createElement('video');
                 video.src = 'animation.mp4';
                 video.loop = true;
@@ -56,33 +72,46 @@
                 video.playsInline = true;
                 await video.load();
 
-                // 3. 创建视频平面
+                // 创建视频纹理平面
                 const videoTexture = new THREE.VideoTexture(video);
                 const plane = new THREE.Mesh(
-                    new THREE.PlaneGeometry(0.8, 0.8),
+                    new THREE.PlaneGeometry(1, 1),
                     new THREE.MeshBasicMaterial({ map: videoTexture, transparent: true })
                 );
 
-                // 4. 绑定识别目标
-                const anchor = mindarThree.addAnchor(0);
+                // 绑定到识别目标
+                const anchor = mindarController.createAnchor(0);
                 anchor.group.add(plane);
+                scene.add(anchor.group);
 
-                // 5. 启动AR
-                await mindarThree.start();
-                renderer.setAnimationLoop(() => {
-                    if (anchor.group.visible && video.paused) {
-                        video.play().catch(() => {});
+                // 启动渲染循环
+                function render() {
+                    requestAnimationFrame(render);
+                    if (anchor.visible) {
+                        if (video.paused) video.play().catch(() => {});
                     }
                     renderer.render(scene, camera);
+                    mindarController.update();
+                }
+                render();
+
+                // 适配窗口大小
+                window.addEventListener('resize', () => {
+                    renderer.setSize(window.innerWidth, window.innerHeight);
+                    camera.aspect = window.innerWidth / window.innerHeight;
+                    camera.updateProjectionMatrix();
                 });
 
-                document.querySelector('.tip').textContent = 'AR已启动 → 对准拓片播放动画';
+                document.querySelector('.tip').textContent = 'AR已启动 ✅ 对准拓片播放动画';
 
             } catch (err) {
-                alert(`AR启动失败：${err.message}\n请检查：1. 本地库文件是否存在 2. targets.mind是否正确 3. animation.mp4是否存在`);
+                alert(`AR启动失败：${err.message}\n请检查：targets.mind / animation.mp4 是否存在`);
                 console.error('错误详情:', err);
             }
         }
+
+        // 移动端手动触发（解决权限/播放限制）
+        document.addEventListener('click', startAR, { once: true });
     </script>
 </body>
 </html>
