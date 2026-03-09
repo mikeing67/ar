@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>拓印AR毕设</title>
+    <!-- 引入MindAR核心库（无需下载，直接在线调用） -->
+    <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image.prod.js"></script>
+    <style>
+        body { margin: 0; padding: 0; }
+        canvas { position: fixed; top: 0; left: 0; width: 100%; height: 100%; }
+        video { display: none; }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <script>
+        // 初始化MindAR
+        async function initAR() {
+            const mindarThree = new window.MINDAR.IMAGE.MindARThree({
+                container: document.getElementById('canvas'),
+                imageTargetSrc: 'targets.mind', // 对应你的拓片识别文件
+            });
+            const { renderer, scene, camera } = mindarThree;
+
+            // 加载动画视频
+            const video = document.createElement('video');
+            video.src = 'animation.mp4'; // 对应你的拓印动画文件
+            video.loop = true; // 循环播放
+            video.muted = true; // 静音（避免手机自动播放限制）
+            await video.load();
+
+            // 创建视频纹理，绑定到识别目标
+            const videoTexture = new THREE.VideoTexture(video);
+            const geometry = new THREE.PlaneGeometry(1, 1); // 视频大小适配拓片
+            const material = new THREE.MeshBasicMaterial({ map: videoTexture, transparent: true });
+            const plane = new THREE.Mesh(geometry, material);
+
+            // 将视频绑定到第一个识别目标（targets.mind里的第一个拓片）
+            const anchor = mindarThree.addAnchor(0);
+            anchor.group.add(plane);
+
+            // 启动AR，识别到拓片后播放视频
+            await mindarThree.start();
+            renderer.setAnimationLoop(() => {
+                if (anchor.group.visible) {
+                    video.play(); // 识别到拓片，播放动画
+                } else {
+                    video.pause(); // 离开拓片，暂停动画
+                }
+                renderer.render(scene, camera);
+            });
+        }
+
+        // 页面加载完成后启动AR（请求摄像头权限）
+        window.onload = () => {
+            initAR().catch((err) => {
+                alert('AR启动失败：' + err.message);
+                console.error(err);
+            });
+        };
+    </script>
+</body>
+</html>
